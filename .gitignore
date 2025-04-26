@@ -1,0 +1,26 @@
+# Ignorar entorno virtual
+venv/
+.venv/
+
+# Ignorar base de datos SQLite
+*.db
+
+# Ignorar directorios de caché de Python
+__pycache__/
+*.pyc
+
+# Archivos específicos de editores (ej. VS Code)
+.vscode/
+
+# Archivos de logs
+*.log
+
+# Directorios de build del frontend (se añadirán más tarde si usas Flutter/RN)
+# build/
+# android/build/
+# ios/build/
+# node_modules/ # Si usas Node.js para algo en el backend o React Native
+
+# Credenciales y archivos de configuración sensibles (¡muy importante!)
+# .env
+# config.ini
