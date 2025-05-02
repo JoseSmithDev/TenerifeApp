@@ -9,8 +9,9 @@ def populate_base_hierarchy(session): # Recibe la sesión
     europa = Continent(name="Europa")
     espana = Country(name="España", continent=europa)
     canarias = AutonomousCommunity(name="Canarias", country=espana)
+    valencia = AutonomousCommunity(name="Valencia", country=espana)
 
-    session.add_all([europa, espana, canarias])
+    session.add_all([europa, espana, canarias, valencia])
 
     # --- Añade esta línea ---
     session.flush() # Fuerza la inserción para que los objetos tengan IDs y sean consultables

@@ -23,6 +23,7 @@ def populate_locations(session):
         la_laguna_obj = session.query(Municipality).filter_by(name="San Cristóbal de La Laguna").one()
         sta_cruz_obj = session.query(Municipality).filter_by(name="Santa Cruz de Tenerife").one() # Ojo, es un municipio, no la provincia entera
         adeje_obj = session.query(Municipality).filter_by(name="Adeje").one()
+        valencia_obj = session.query(Municipality).filter_by(name="Valencia").one()
         # TODO: Añadir consultas para todos los municipios necesarios para tus 20 ubicaciones
         # Ejemplo:
         # orotava_obj = session.query(Municipality).filter_by(name="La Orotava").one()
@@ -73,29 +74,47 @@ def populate_locations(session):
     )
     ubicaciones_list.append(parque_siam)
 
-    # TODO: Añade aquí la lógica para crear las 18 ubicaciones restantes.
-    # Por cada ubicación, crea el objeto Location y añádelo a la lista 'ubicaciones_list'.
-    # Asegúrate de asignar el 'municipality' correcto usando los objetos Municipality consultados.
-    # Puedes usar un diccionario grande con todos los datos de las 20 ubicaciones e iterar.
-    # Ejemplo (Pseudocódigo):
-    # datos_20_ubicaciones = [...] # Lista o dict con datos de todas las ubicaciones
-    # for data in datos_20_ubicaciones:
-    #     # Consultar el municipio para ESTA ubicación (o tener los objetos municipio en un dict)
-    #     muni_obj_for_this_loc = session.query(Municipality).filter_by(name=data['municipio_nombre']).one()
-    #     loc = Location(
-    #         name=data['name'],
-    #         description=data['description'],
-    #         latitude=data['latitude'],
-    #         longitude=data['longitude'],
-    #         unlocked_content_url=data['unlocked_content_url'],
-    #         difficulty=data['difficulty'],
-    #         is_natural=data['is_natural'],
-    #         best_season=data['best_season'],
-    #         best_time_of_day=data['best_time_of_day'],
-    #         municipality=muni_obj_for_this_loc # <-- Enlazar
-    #     )
-    #     ubicaciones_list.append(loc)
+    palmetum_tnf = Location(
+        name="Palmetum",
+        description="Jardín botánico especializado en palmeras, construido sobre un antiguo vertedero.",
+        latitude=28.4608,
+        longitude=-16.2549,
+        unlocked_content_url='https://ejemplo.com/foto_palmetum.jpg', # TODO: Reemplazar por URL real
+        difficulty="Fácil Acceso",
+        is_natural=False,
+        best_season="Todo el Año", # O "Todo el Año"
+        best_time_of_day="Día Completo",
+        municipality=sta_cruz_obj 
+    )
+    ubicaciones_list.append(palmetum_tnf)
 
+    ciudad_art_ciencia = Location(
+        name='Ciudad de las Artes y las Ciencias',
+        description= 'Impresionante complejo arquitectónico diseñado por Santiago Calatrava y Félix Candela.',
+        latitude= 39.4658, # Coordenada aproximada
+        longitude= -0.3559, # Coordenada aproximada
+        unlocked_content_url='https://ejemplo.com/foto_cac.jpg', # Placeholder
+        difficulty= 'Fácil Acceso',
+        is_natural= False,
+        best_season= 'Todo el Año',
+        best_time_of_day= 'Día Completo',
+        municipality= valencia_obj # <-- ID del municipio de Valencia
+    )
+    ubicaciones_list.append(ciudad_art_ciencia)
+
+    mercado_central = Location(
+        name='Mercado Central de Valencia',
+        description= 'Uno de los mercados de abastos más grandes de Europa, con arquitectura modernista.',
+        latitude= 39.4725, # Coordenada aproximada
+        longitude= -0.3787, # Coordenada aproximada
+        unlocked_content_url='https://ejemplo.com/foto_mercadocentral.jpg', # Placeholder
+        difficulty= 'Fácil Acceso',
+        is_natural= False,
+        best_season= 'Todo el Año',
+        best_time_of_day= 'Mañana', # Típicamente abre por las mañanas
+        municipality= valencia_obj  # <-- ID del municipio de Valencia
+    )
+    ubicaciones_list.append(mercado_central)
 
     # Añade todos los objetos Location a la sesión de una vez
     session.add_all(ubicaciones_list) # Añade la lista completa

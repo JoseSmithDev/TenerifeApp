@@ -1,6 +1,9 @@
 # backend/app.py
 
-from flask import Flask, jsonify, request # Importa Flask y jsonify para respuestas JSON
+from flask import Flask, jsonify, request
+from sqlalchemy import join, distinct, func
+import models, json
+from poblacion_db.session_setup import SessionLocal  # Importa Flask y jsonify para respuestas JSON
 # Importa tus modelos y setup de sesión desde donde los hayas guardado
 # Si models.py está en el mismo directorio:
 # from models import Location, get_session
@@ -8,12 +11,31 @@ from flask import Flask, jsonify, request # Importa Flask y jsonify para respues
 # from models import Location
 # from poblacion_db.session_setup import get_session # Asegúrate que poblacion_db es un paquete y models.py es accesible
 
+# Importamos engine, Location, Municipality y Base desde models.py
+# (Deja esta línea también, la necesitas para usar esos nombres directamente)
 
 # --- Ajusta estas importaciones según la estructura de tu proyecto ---
 # Asumiremos que models.py está en la raíz del backend
 import sys
 import os
 
+from models import engine, Location, Municipality, Base, User, UserLocationVisit #
+# --- Importación para seguridad de contraseñas ---
+from werkzeug.security import generate_password_hash, check_password_hash
+
+# --- Importación para cálculo de distancia ---
+from geopy.distance import geodesic # Importa la función geodesic de geopy.distance
+
+CHECKIN_RADIUS_METERS = 4000
+
+
+ACHIEVEMENTS = [
+    {"id": 1, "name": "Novato Explorador", "description": "Visita tu primera ubicación única.", "criteria": {"type": "total_unique_visits", "count": 1}},
+    {"id": 2, "name": "Explorador Entusiasta", "description": "Visita 5 ubicaciones únicas.", "criteria": {"type": "total_unique_visits", "count": 5}},
+    {"id": 3, "name": "Conquistador de Municipios (1)", "description": "Visita ubicaciones en 1 municipio diferente.", "criteria": {"type": "unique_municipalities", "count": 1}},
+    {"id": 4, "name": "Conquistador de Municipios (3)", "description": "Visita ubicaciones en 3 municipios diferentes.", "criteria": {"type": "unique_municipalities", "count": 3}},
+    # Puedes añadir más logros aquí basados en otros criterios si quieres
+]
 # Añade el directorio superior al path para poder importar models
 # Obtén el directorio actual (donde está app.py, si está en backend/)
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -38,6 +60,205 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # --- Configuración de la Aplicación Flask ---
 
 app = Flask(__name__)
+
+
+
+@app.route('/locations', methods=['GET']) # <-- Decorador para la ruta /locations
+def get_all_locations(): # <-- La función que maneja /locations GET
+    print("DEBUG: Recibida petición a /locations")
+
+    # --- Leer el parámetro de filtro por municipio desde la query string ---
+    # request.args.get('municipality_id') obtiene el valor del parámetro 'municipality_id'
+    # .get() devuelve None si el parámetro no está presente.
+    municipality_id_str = request.args.get('municipality_id')
+    municipality_id = None
+    if municipality_id_str:
+        try:
+            municipality_id = int(municipality_id_str) # Intentar convertir a entero
+            print(f"DEBUG: Filtro por municipality_id recibido: {municipality_id}")
+        except ValueError:
+            # Si el valor no es un entero, puedes manejar el error o ignorar el filtro
+            print(f"DEBUG: Valor de municipality_id '{municipality_id_str}' no es un entero válido. Ignorando filtro.")
+            # Opcional: Retornar un error 400 Bad Request si el filtro es inválido
+            # return jsonify({"message": "ID de municipio inválido"}), 400
+
+
+    with get_db() as db:
+        # Consulta base: obtener todas las ubicaciones y sus municipios
+        query = db.query(Location, Municipality).\
+                   join(Municipality, Location.municipality_id == Municipality.municipality_id)
+
+        # --- Aplicar filtro condicional por municipio ---
+        if municipality_id is not None:
+            # Si se proporcionó un municipality_id válido, añadir el filtro
+            query = query.filter(Location.municipality_id == municipality_id)
+            print(f"DEBUG: Aplicando filtro por municipality_id = {municipality_id}")
+        else:
+            print("DEBUG: No se aplicó filtro por municipality_id.")
+
+
+        # Ejecutar la consulta (filtrada o no)
+        locations = query.all()
+
+        print(f"DEBUG: get_all_locations - Encontradas {len(locations)} ubicaciones (filtradas: {municipality_id is not None}).")
+
+
+        # Formatear los resultados
+        locations_list = []
+        # locations es una lista de tuplas (Location, Municipality)
+        for location, municipality in locations:
+            locations_list.append({
+                "location_id": location.location_id,
+                "name": location.name,
+                "description": location.description,
+                "latitude": location.latitude,
+                "longitude": location.longitude,
+                "unlocked_content_url": location.unlocked_content_url,
+                "difficulty": location.difficulty,
+                "is_natural": location.is_natural,
+                "best_season": location.best_season,
+                "best_time_of_day": location.best_time_of_day,
+                "municipality_id": location.municipality_id, # Incluir el ID del municipio también
+                "municipality_name": municipality.name, # Incluir el nombre del municipio
+            })
+
+        # Retornar la lista de ubicaciones (filtrada o no)
+        return jsonify(locations_list), 200
+
+# --- Rutas de la API ---
+# --- Endpoint GET /locations/<int:location_id> (Manejador de 404) ---
+# --- Asegúrate que tu función get_location_details esté CORRECTAMENTE definida ---
+# Debería verse similar a esto, con el <int:location_id> en el decorador:
+@app.route('/locations/<int:location_id>', methods=['GET'])
+def get_location_details(location_id):
+    # ... código de get_location_details (busca por location_id) ...
+    print(f"DEBUG: Recibida petición a /locations/{location_id}")
+    with get_db() as db:
+        # Asegúrate que tu consulta aquí filtra por Location.location_id == location_id
+        # ... consulta ...
+        location = db.query(Location, Municipality)\
+             .join(Municipality, Location.municipality_id == Municipality.municipality_id)\
+             .filter(Location.location_id == location_id)\
+             .first() # <--- Aquí NO debería haber \
+        
+        if location:
+             location_obj, muni_obj = location # Desempaquetar la tupla
+             location_data = {
+                "location_id": location_obj.location_id,
+                "name": location_obj.name,
+                "description": location_obj.description,
+                "latitude": location_obj.latitude,
+                "longitude": location_obj.longitude,
+                "unlocked_content_url": location_obj.unlocked_content_url,
+                "difficulty": location_obj.difficulty,
+                "is_natural": location_obj.is_natural,
+                "best_season": location_obj.best_season,
+                "best_time_of_day": location_obj.best_time_of_day,
+                "municipality_id": location_obj.municipality_id,
+                "municipality_name": muni_obj.name,
+            }
+             print(f"DEBUG /locations/{location_id}: Contenido del diccionario location_data: {location_data}")
+             return jsonify(location_data), 200
+        else:
+            print(f"DEBUG /locations/{location_id}: Ubicación no encontrada.")
+            return jsonify({"message": "Ubicación no encontrada"}), 404
+
+# ... Otros endpoints irán aquí (checkin, users, reviews, etc.) ...
+
+# Puedes añadir más endpoints aquí (ej: /locations/<int:location_id>)
+
+# backend/app.py
+
+# ... tus importaciones (Flask, jsonify, request, sys, os, models, etc.) ...
+# ... tu configuración de DB (engine, SessionLocal, get_db) ...
+# ... tus modelos (Continent, Country, Location, User, etc.) ...
+# ... tu ruta GET /locations ...
+# ... tu ruta GET /locations/<int:location_id> ...
+
+
+# --- Nueva Ruta para Check-in ---
+@app.route('/checkin', methods=['POST'])
+def checkin_location():
+    print("DEBUG: Recibida petición a /checkin")
+
+    # ... (código para obtener y validar datos user_id, location_id, user_lat, user_lng) ...
+    # Asegúrate que la conversión a float de user_lat/lng está ANTES de usar en geodesic
+    try:
+        user_lat = float(request.json.get('latitude'))
+        user_lng = float(request.json.get('longitude'))
+        user_id = int(request.json.get('user_id')) # Asegurar que user_id es int
+        location_id = int(request.json.get('location_id')) # Asegurar que location_id es int
+    except (ValueError, TypeError):
+        print("DEBUG: Petición /checkin - Coordenadas o IDs no válidos.")
+        return jsonify({"message": "Los IDs y coordenadas deben ser valores numéricos válidos"}), 400
+
+
+    print(f"DEBUG: Datos recibidos para check-in: UserID={user_id}, LocationID={location_id}, Lat={user_lat}, Lng={user_lng}")
+
+    # Conectar a la base de datos
+    with get_db() as db:
+        # Buscar la ubicación por el ID proporcionado
+        location = db.query(Location).filter(Location.location_id == location_id).first()
+
+        if location is None:
+            print(f"DEBUG: Petición /checkin - Ubicación con ID {location_id} no encontrada en DB.")
+            return jsonify({"message": f"Ubicación con ID {location_id} no encontrada en la base de datos"}), 404
+
+        # --- Lógica de Verificación de Distancia ---
+        user_coords = (user_lat, user_lng)
+        location_coords = (location.latitude, location.longitude)
+        distance_in_meters = geodesic(user_coords, location_coords).meters
+
+        print(f"DEBUG: Distancia calculada: {distance_in_meters:.2f} metros. Radio permitido: {CHECKIN_RADIUS_METERS} metros.")
+
+
+        # Comparar la distancia con el radio permitido
+        if distance_in_meters <= CHECKIN_RADIUS_METERS:
+            # --- CHECK-IN EXITOSO POR DISTANCIA ---
+            print(f"DEBUG: Check-in exitoso por distancia para ubicación {location.name}. Procediendo a registrar visita.")
+
+            # *** IMPLEMENTACIÓN: Registrar el check-in en la base de datos para el usuario ***
+            # Opcional: Verificar si el usuario ya ha visitado esta ubicación muy recientemente (código comentado anteriormente)
+
+            try:
+                # Crear una nueva instancia de visita
+                # visit_timestamp se generará por defecto con datetime.utcnow() si no lo especificas en el modelo
+                new_visit = UserLocationVisit(user_id=user_id, location_id=location_id)
+
+                db.add(new_visit) # Añadir la nueva visita a la sesión
+                db.commit() # Guardar los cambios en la base de datos (INSERT)
+                db.refresh(new_visit) # Refrescar para obtener el ID de la visita y timestamp real de DB
+
+                print(f"DEBUG: Check-in - Visita registrada exitosamente: VisitID={new_visit.visit_id}, UserID={user_id}, LocationID={location_id}, Timestamp={new_visit.visit_timestamp}")
+
+                # Retornar respuesta de éxito
+                return jsonify({
+                    "message": f"¡Check-in exitoso en {location.name}! Tu visita ha sido registrada.",
+                    "status": "success",
+                    "distancia_metros": round(distance_in_meters, 2),
+                    "radio_permitido_metros": CHECKIN_RADIUS_METERS,
+                    "visit_id": new_visit.visit_id # Opcional: devolver el ID de la visita creada
+                }), 200 # 200 OK
+
+            except Exception as e:
+                db.rollback() # Deshacer si hay un error en el proceso de DB (ej: violación de UniqueConstraint si la añades)
+                print(f"DEBUG: Check-in - Error al registrar visita para UserID={user_id}, LocationID={location_id}: {e}")
+                return jsonify({"message": f"Error interno al registrar la visita: {e}", "status": "error_db"}), 500 # 500 Internal Server Error
+
+
+        else:
+            # --- CHECK-IN FALLIDO (Demasiado lejos) ---
+            print(f"DEBUG: Check-in fallido para ubicación {location.name}. Demasiado lejos.")
+            # Retornar respuesta de fallo por distancia
+            return jsonify({
+                "message": f"Estás demasiado lejos de {location.name} ({distance_in_meters:.2f}m). Necesitas estar más cerca de {CHECKIN_RADIUS_METERS}m para hacer check-in.",
+                "status": "too_far",
+                "distancia_metros": round(distance_in_meters, 2),
+                "radio_permitido_metros": CHECKIN_RADIUS_METERS
+            }), 200 # Retornamos 200 porque la petición POST fue válida
+
+
+
 
 # Decorador para manejar la sesión de base de datos en cada petición
 @app.before_request
@@ -72,111 +293,242 @@ def get_db():
         db.close() # Cierra la sesión
 
 
-# --- Rutas de la API ---
 
-@app.route('/locations', methods=['GET'])
-def get_locations():
-    """
-    Endpoint para obtener la lista de todas las ubicaciones.
-    """
-    locations_list = []
-    with get_db() as db: # Usa el contexto para gestionar la sesión
-        # Consultar todas las ubicaciones desde la DB
-        locations = db.query(Location).all()
+# --- Ruta para obtener todas las ubicaciones (incluyendo filtro por municipio) ---
 
-        # Convertir objetos SQLAlchemy a diccionarios para JSON
-        for loc in locations:
-            # Aquí, si quieres incluir datos de la jerarquía, necesitarías cargar la relación
-            # y añadirlos al diccionario. Por ahora, solo datos de Location.
-            # loc.municipality.name # Esto accedería al nombre del municipio
-            # loc.municipality.island.name # Y así sucesivamente
 
-            location_data = {
-                "location_id": loc.location_id,
-                "name": loc.name,
-                "description": loc.description,
-                "latitude": loc.latitude,
-                "longitude": loc.longitude,
-                "unlocked_content_url": loc.unlocked_content_url,
-                "difficulty": loc.difficulty,
-                "is_natural": loc.is_natural,
-                "best_season": loc.best_season,
-                "best_time_of_day": loc.best_time_of_day,
-                # Incluir el ID del municipio por ahora
-                "municipality_id": loc.municipality_id,
-                # Si quieres el nombre del municipio directamente:
-                "municipality_name": loc.municipality.name if loc.municipality else None
-            }
 
-             # --- Añade esta línea para depurar ---
-            print("Contenido del diccionario location_data:")
-            print(location_data)
-            print("-" * 20) # Línea separadora opcional para claridad en la salida
-            # --- Fin de líneas de depuración ---
 
-            locations_list.append(location_data)
+@app.route('/register', methods=['POST'])
+def register_user():
+    print("DEBUG: Recibida petición a /register")
+    if not request.json or not 'username' in request.json or not 'password' in request.json:
+        print("DEBUG: Registro - Faltan username o password en JSON.")
+        return jsonify({"message": "Se requiere nombre de usuario y contraseña"}), 400
 
-    # Devolver la lista de ubicaciones como respuesta JSON
-    return jsonify(locations_list)
+    username = request.json['username']
+    password = request.json['password']
 
-# --- Endpoint GET /locations/<int:location_id> (Manejador de 404) ---
-@app.route('/locations/<int:location_id>', methods=['GET'])
-def get_location_details(location_id):
-    """
-    Endpoint para obtener los detalles de una ubicación específica por su ID.
-    """
-    with get_db() as db: # Usa el contexto para gestionar la sesión
-        # Consultar la ubicación por su ID
-        # Usamos .filter(Location.location_id == location_id) para buscar por PK
-        # Usamos .first() que devuelve None si no encuentra nada (más fácil de manejar para 404)
-        location = db.query(Location).filter(Location.location_id == location_id).first()
+    print(f"DEBUG: Registro - Intentando registrar usuario: {username}")
 
-        # Si la ubicación no se encuentra, devolver un error 404
-        if location is None:
-            print(f"DEBUG /locations/{location_id}: Ubicación no encontrada en la DB.") # Debug
-            return jsonify({"message": f"Ubicación con ID {location_id} no encontrada"}), 404 # 404 es el código de estado HTTP
+    with get_db() as db:
+        # Verificar si el nombre de usuario ya existe
+        existing_user = db.query(User).filter(User.username == username).first()
+        if existing_user:
+            print(f"DEBUG: Registro - Usuario existente: {username}")
+            return jsonify({"message": "El nombre de usuario ya existe"}), 409 # 409 Conflict
 
-        # Si la ubicación existe, convertir el objeto SQLAlchemy a un diccionario
-        # Incluir información del municipio usando la relación
-        municipality_name = location.municipality.name if location.municipality else None # Accede al nombre del municipio
+        # Hashear la contraseña de forma segura
+        password_hash = generate_password_hash(password)
 
-        location_data = {
-            "location_id": location.location_id,
-            "name": location.name,
-            "description": location.description,
-            "latitude": location.latitude,
-            "longitude": location.longitude,
-            "unlocked_content_url": location.unlocked_content_url,
-            "difficulty": location.difficulty,
-            "is_natural": location.is_natural,
-            "best_season": location.best_season,
-            "best_time_of_day": location.best_time_of_day,
-            # Incluir el ID y nombre del municipio
-            "municipality_id": location.municipality_id,
-            "municipality_name": municipality_name, # <-- Añadido nombre del municipio
-            # TODO: Si necesitas más datos de jerarquía (isla, provincia), deberás cargarlos y añadirlos aquí
-            # Ejemplo:
-            # "island_name": location.municipality.island.name if location.municipality and location.municipality.island else None,
+        # Crear el nuevo usuario
+        new_user = User(username=username, password_hash=password_hash)
+        db.add(new_user)
+
+        try:
+            db.commit() # Intentar guardar en DB
+            print(f"DEBUG: Registro - Usuario {username} registrado exitosamente con ID: {new_user.user_id}")
+            # db.refresh(new_user) # Opcional si necesitas el ID inmediatamente después del commit
+
+            # Retornar una respuesta de éxito
+            return jsonify({"message": "Usuario registrado exitosamente", "user_id": new_user.user_id}), 201 # 201 Created
+
+        except Exception as e:
+            db.rollback() # Deshacer si hay un error
+            print(f"DEBUG: Registro - Error al registrar usuario {username}: {e}")
+            return jsonify({"message": f"Error al registrar usuario: {e}"}), 500 # 500 Internal Server Error
+        
+
+@app.route('/users/<int:user_id>/visits', methods=['GET'])
+def get_user_visits(user_id): # El user_id de la URL se pasa como argumento a la función
+    print(f"DEBUG: Recibida petición a /users/{user_id}/visits")
+
+    with get_db() as db:
+        # Opcional: Verificar si el usuario existe (buena práctica)
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if user is None:
+            print(f"DEBUG: get_user_visits - Usuario con ID {user_id} no encontrado.")
+            return jsonify({"message": f"Usuario con ID {user_id} no encontrado"}), 404 # 404 Not Found
+
+        # Consultar las visitas de este usuario, uniendo con la tabla locations
+        # Queremos obtener los detalles de la ubicación visitada
+        # ¡CORREGIDO! Pedimos los 3 modelos en la consulta
+        visits = (db.query(UserLocationVisit, Location, Municipality) # <-- Abre paréntesis aquí
+                         .join(Location, UserLocationVisit.location_id == Location.location_id)
+                         .join(Municipality, Location.municipality_id == Municipality.municipality_id)
+                         .filter(UserLocationVisit.user_id == user_id)
+                         .all()) # <-- Cierra paréntesis aquí y NO pongas \
+        print(f"DEBUG: get_user_visits - Encontradas {len(visits)} visitas para UserID {user_id}.")
+
+        # --- Consulta para el Total de UBICACIONES DISPONIBLES ---
+        # Cuenta todas las filas en la tabla Location
+        total_available_locations_query = db.query(func.count(Location.location_id)).scalar() # .scalar() obtiene el primer resultado de una columna única
+
+        print(f"DEBUG: get_user_visits - Total de ubicaciones disponibles encontradas: {total_available_locations_query}.")
+        
+        visited_location_ids_query = db.query(distinct(UserLocationVisit.location_id)).\
+                                       filter(UserLocationVisit.user_id == user_id).\
+                                       subquery() # La convertimos en una subconsulta
+
+        # Luego, consultamos los detalles de esas ubicaciones únicas, uniendo con Municipality
+        # Seleccionamos las ubicaciones cuyo ID está en la lista de IDs visitados
+        unique_visits_query = (db.query(Location, Municipality)
+                               .join(Municipality, Location.municipality_id == Municipality.municipality_id)
+                               .filter(Location.location_id.in_(visited_location_ids_query)) # Filtrar por los IDs únicos visitados
+                               .all()) # Obtener la lista de objetos Location y Municipality para ubicaciones únicas
+        
+         # --- NUEVA Consulta para Progreso por Municipio ---
+        # Contar ubicaciones únicas visitadas por municipio para este usuario
+        progress_by_municipality_query = (db.query(Municipality.name, func.count(distinct(Location.location_id)))
+                                           .join(Location, Municipality.municipality_id == Location.municipality_id)
+                                           .join(UserLocationVisit, Location.location_id == UserLocationVisit.location_id)
+                                           .filter(UserLocationVisit.user_id == user_id) # Filtrar por el usuario
+                                           .group_by(Municipality.name) # Agrupar por nombre de municipio
+                                           .all()) # Ejecutar la consulta
+        
+        print(f"DEBUG: get_user_visits - Progreso por municipio encontrado: {progress_by_municipality_query}")
+
+        # El número total de ubicaciones únicas visitadas es la longitud de esta lista
+        total_unique_visits = len(unique_visits_query)
+
+        print(f"DEBUG: get_user_visits - Encontradas {total_unique_visits} UBICACIONES ÚNICAS visitadas para UserID {user_id}.")
+
+        progress_by_municipality_list = []
+        # progress_by_municipality_query es una lista de tuplas: (municipality_name, visited_count)
+        for muni_name, visited_count in progress_by_municipality_query:
+            progress_by_municipality_list.append({
+                "municipality_name": muni_name,
+                "visited_count": visited_count
+            })
+
+
+        # Formatear los resultados en una lista de diccionarios para la respuesta JSON
+        # visits es una lista de tuplas (UserLocationVisit, Location)
+        visited_locations_list = []
+        for location, municipality in unique_visits_query:
+            visited_locations_list.append({
+                # Incluir detalles relevantes de la ubicación
+                "location_id": location.location_id,
+                "name": location.name,
+                "description": location.description,
+                "latitude": location.latitude,
+                "longitude": location.longitude,
+                "difficulty": location.difficulty,
+                "is_natural": location.is_natural,
+                "best_season": location.best_season,
+                "best_time_of_day": location.best_time_of_day,
+                "municipality_name": municipality.name, # Asumiendo que ya tienes este campo
+                # Opcional: incluir detalles de la visita si son relevantes (timestamp, etc.)
+                # "visit_id": visit.visit_id,
+                # "visit_timestamp": visit.visit_timestamp.isoformat() # Formato ISO 8601 para compatibilidad JSON
+            })
+
+        response_data = {
+            "total_visits": total_unique_visits,
+            "visited_locations": visited_locations_list,
+            "total_locations": total_available_locations_query,
+            "progress_by_municipality": progress_by_municipality_list # <-- ¡Añade el progreso por municipio aquí!
         }
-        # TODO: Añadir más campos si necesitas más detalles en el frontend
-
-        # --- Añade esta línea para depurar la salida de /locations/<id> ---
-        print(f"DEBUG /locations/{location_id}: Contenido del diccionario location_data:")
-        print(location_data)
-        print("-" * 20)
-        # --- Fin de líneas de depuración ---
+        return jsonify(response_data), 200
 
 
-        # Devolver el diccionario como respuesta JSON
-        return jsonify(location_data)
+# --- Nueva Ruta para Inicio de Sesión de Usuario ---
+@app.route('/login', methods=['POST'])
+def login_user():
+    print("DEBUG: Recibida petición a /login")
+    if not request.json or not 'username' in request.json or not 'password' in request.json:
+        print("DEBUG: Login - Faltan username o password en JSON.")
+        return jsonify({"message": "Se requiere nombre de usuario y contraseña"}), 400
 
-# ... Otros endpoints irán aquí (checkin, users, reviews, etc.) ...
+    username = request.json['username']
+    password = request.json['password']
 
-# Puedes añadir más endpoints aquí (ej: /locations/<int:location_id>)
+    print(f"DEBUG: Login - Intentando iniciar sesión para usuario: {username}")
+
+    with get_db() as db:
+        # Buscar el usuario por nombre de usuario
+        user = db.query(User).filter(User.username == username).first()
+
+        # Verificar si el usuario existe y si la contraseña es correcta
+        if user and check_password_hash(user.password_hash, password):
+            # *** TODO: Implementar manejo de sesión o tokens de autenticación aquí ***
+            # Por ahora, solo confirmamos el login y devolvemos el user_id.
+            print(f"DEBUG: Login exitoso para usuario: {username} (ID: {user.user_id})")
+            return jsonify({"message": "Inicio de sesión exitoso", "user_id": user.user_id}), 200 # 200 OK
+        else:
+            print(f"DEBUG: Login fallido para usuario: {username} (Credenciales inválidas)")
+            return jsonify({"message": "Nombre de usuario o contraseña incorrectos"}), 401 # 401 Unauthorized
+
+
+@app.route('/users/<int:user_id>/achievements', methods=['GET'])
+def get_user_achievements(user_id):
+    print(f"DEBUG: Recibida petición a /users/{user_id}/achievements")
+
+    progress_response, status_code = get_user_visits(user_id) # Llama a la función existente
+
+    if status_code != 200:
+        # Si get_user_visits falló (ej: usuario no encontrado), retornamos ese error
+        return progress_response, status_code
+    
+    # Decodificamos el cuerpo de la respuesta de get_user_visits
+    progress_data = json.loads(progress_response.get_data()) # Obtiene los datos del Response object
+
+    # Extraer los datos necesarios para evaluar logros
+    total_unique_visits = progress_data.get('total_visits', 0)
+    progress_by_municipality = progress_data.get('progress_by_municipality', [])
+
+    # Calcular el número de municipios únicos visitados
+    unique_municipalities_count = len(progress_by_municipality)
+
+    # --- Evaluar qué logros ha ganado el usuario ---
+    earned_achievements = []
+    for achievement in ACHIEVEMENTS:
+        criteria = achievement.get('criteria')
+        if criteria:
+            criteria_type = criteria.get('type')
+            criteria_count = criteria.get('count')
+
+            if criteria_type == 'total_unique_visits' and criteria_count is not None:
+                if total_unique_visits >= criteria_count:
+                    # Si cumple el criterio de total de visitas únicas
+                    earned_achievements.append({
+                        "id": achievement["id"],
+                        "name": achievement["name"],
+                        "description": achievement["description"],
+                        # Podrías añadir una marca de tiempo de cuándo lo ganó si tuvieras una tabla de Logros Ganados
+                        # "earned_at": "..."
+                    })
+            elif criteria_type == 'unique_municipalities' and criteria_count is not None:
+                 if unique_municipalities_count >= criteria_count:
+                     # Si cumple el criterio de número de municipios únicos
+                     # Evitar duplicados si un logro depende de otro (ej: 3 municipios vs 1)
+                     if not any(a.get('id') == achievement["id"] for a in earned_achievements):
+                         earned_achievements.append({
+                            "id": achievement["id"],
+                            "name": achievement["name"],
+                            "description": achievement["description"],
+                         })
+
+
+    print(f"DEBUG: Logros ganados encontrados para UserID {user_id}: {earned_achievements}")
+
+    # Retornar la lista de logros ganados
+    return jsonify(earned_achievements), 200
+
+
+
+# --- Asegúrate de que esta parte está al final del archivo ---
+if __name__ == '__main__':
+    # ... (código para iniciar Flask) ...
+    print("DEBUG: Database URL configurada:", models.DATABASE_URL)
+    print("DEBUG: Radio de Check-in configurado:", CHECKIN_RADIUS_METERS, "metros.")
+    print("Iniciando servidor Flask...")
+    app.run(debug=True, port=5000)
+    
 
 # --- Ejecutar la Aplicación ---
 
-if __name__ == '__main__':
+#if __name__ == '__main__':
     # Asegúrate de que la DB y las tablas existen (puedes llamarlo aquí o desde un script separado)
     # from models import create_database_tables
     # create_database_tables()
@@ -184,6 +536,6 @@ if __name__ == '__main__':
     # Asegúrate de que la DB esté poblada (ejecuta populate_db.py antes)
     # print("Recordatorio: Asegúrate de haber ejecutado models.py y populate_db.py antes de iniciar el servidor.")
 
-    print("Iniciando servidor Flask...")
+#    print("Iniciando servidor Flask...")
     # Puedes configurar el host y puerto si es necesario (ej: host='0.0.0.0' para acceso externo)
-    app.run(debug=True) # debug=True es útil durante el desarrollo
+#    app.run(debug=True) # debug=True es útil durante el desarrollo

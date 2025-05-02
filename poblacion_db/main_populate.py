@@ -3,8 +3,8 @@
 # Importación ABSOLUTA desde el paquete setup_db/ (o poblacion_db/)
 # Asume que la carpeta 'TenerifeApp' está en el sys.path de Python.
 # El nombre 'setup_db' debe coincidir con el nombre de la carpeta.
-from poblacion_db.session_setup import get_session # O from poblacion_db.session_setup import get_session
-
+from poblacion_db.session_setup import SessionLocal  # O from poblacion_db.session_setup import get_session
+from poblacion_db.populate_base_hierarchy import populate_base_hierarchy
 # El resto de importaciones desde otros archivos dentro de setup_db/ también deben ser absolutas
 from poblacion_db.crear_continente_pais_comunidad import populate_base_hierarchy
 # ... y así con los demás scripts de crear_...
@@ -12,6 +12,9 @@ from poblacion_db.crear_provincias_islas_municipios import populate_provinces_is
 from poblacion_db.crear_ubicaciones import populate_locations
 from poblacion_db.crear_niveles import populate_levels
 from poblacion_db.crear_logros import populate_achievements
+from poblacion_db.populate_base_hierarchy import populate_base_hierarchy
+
+
 
 # Importaciones desde models.py también son absolutas desde la raíz
 from models import Base, engine # Si decides llamarla aquí
@@ -27,34 +30,30 @@ def run_population():
     print("Tablas creadas.")
 
 
-    session = get_session()
-    print("Iniciando proceso de poblamiento completo...")
+    session = SessionLocal() # Obtiene la factory de sesión
+
+    # Usar un bloque try...finally para asegurar que la sesión se cierre
     try:
-        # Llama a las funciones en el orden correcto de dependencia
-        populate_base_hierarchy(session)
-        # Necesitarás IDs de los pasos anteriores para el siguiente.
-        # Una forma es pasar los objetos creados, otra es consultarlos.
-        # Si haces session.flush() después de cada paso de creación de jerarquía,
-        # los objetos creados tendrán ID antes del commit final.
+        # --- Secuencia CORREGIDA de llamadas a scripts de poblamiento ---
+        populate_base_hierarchy(session) # <-- ¡Llamar primero a la jerarquía base!
+        populate_provinces_islands_municipalities(session) # Luego crear provincias/islas/municipios
+        populate_locations(session) # Finalmente crear ubicaciones
 
-        # Ejemplo asumiendo que populate_base_hierarchy hizo flush o puedes consultar
-        # espana_obj = session.query(Country).filter_by(name="España").first()
-        # canarias_obj = session.query(AutonomousCommunity).filter_by(name="Canarias").first()
-        # ... y pasarlos o usarlos en la siguiente función ...
-
-        populate_provinces_islands_municipalities(session)
-        populate_locations(session) # populate_locations necesitará IDs de municipios
-        populate_levels(session)
-        populate_achievements(session) # populate_achievements necesitará IDs de jerarquía/ubicaciones
-
-        # Confirma todos los cambios al final
+        # Confirmar los cambios en la base de datos
         session.commit()
-        print("Proceso de poblamiento completado exitosamente.")
+        print("Poblamiento completado. Cambios confirmados.")
 
     except Exception as e:
-        session.rollback() # Revierte todos los cambios si algo falla
+        # Si ocurre un error en cualquier script, revierte los cambios
+        session.rollback()
         print(f"Error durante el poblamiento. Revirtiendo cambios: {e}")
+        # Opcional: Imprimir la traza completa del error para debug
+        # import traceback
+        # traceback.print_exc()
+        # Puedes re-lanzar la excepción si quieres que el programa termine con error
+        # raise e
     finally:
+        # Asegurarse de que la sesión se cierra
         session.close()
         print("Sesión de base de datos cerrada.")
 

@@ -7,7 +7,7 @@ from models import engine, Base # Base si la usas aquí, ej. para create_all
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-def get_session():
+def get_session_factory():
     """Retorna una nueva instancia de sesión."""
     return SessionLocal()
 
