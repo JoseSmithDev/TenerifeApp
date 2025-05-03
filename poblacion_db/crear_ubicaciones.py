@@ -63,8 +63,8 @@ def populate_locations(session):
     parque_siam = Location(
         name="Siam Park",
         description="Famoso parque acuático en Costa Adeje.",
-        latitude=28.0718,
-        longitude=-16.3379,
+        latitude=28.072088,
+        longitude=-16.725585,
         unlocked_content_url="https://ejemplo.com/foto_siampark.jpg", # TODO: Reemplazar por URL real
         difficulty="Fácil Acceso",
         is_natural=False,

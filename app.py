@@ -19,7 +19,7 @@ from poblacion_db.session_setup import SessionLocal  # Importa Flask y jsonify p
 import sys
 import os
 
-from models import engine, Location, Municipality, Base, User, UserLocationVisit #
+from models import engine, Location, Municipality, Base, User, UserLocationVisit, Achievement, UserAchievement #
 # --- Importación para seguridad de contraseñas ---
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -208,6 +208,7 @@ def checkin_location():
         user_coords = (user_lat, user_lng)
         location_coords = (location.latitude, location.longitude)
         distance_in_meters = geodesic(user_coords, location_coords).meters
+        
 
         print(f"DEBUG: Distancia calculada: {distance_in_meters:.2f} metros. Radio permitido: {CHECKIN_RADIUS_METERS} metros.")
 
@@ -226,10 +227,92 @@ def checkin_location():
                 new_visit = UserLocationVisit(user_id=user_id, location_id=location_id)
 
                 db.add(new_visit) # Añadir la nueva visita a la sesión
-                db.commit() # Guardar los cambios en la base de datos (INSERT)
                 db.refresh(new_visit) # Refrescar para obtener el ID de la visita y timestamp real de DB
 
                 print(f"DEBUG: Check-in - Visita registrada exitosamente: VisitID={new_visit.visit_id}, UserID={user_id}, LocationID={location_id}, Timestamp={new_visit.visit_timestamp}")
+
+                print(f"DEBUG Backend: Verificando logros para user {user_id} después de visitar location {location_id}")
+
+                 # 1. Obtener estadísticas actualizadas del usuario
+                # Reutilizamos lógica de consulta de /users/<user_id>/visits
+                # Contar ubicaciones únicas visitadas
+                unique_visits_count = db.query(func.count(distinct(UserLocationVisit.location_id)))\
+                                .filter_by(user_id=user_id)\
+                                .scalar() # Usar .scalar() para obtener el único resultado del conteo
+                
+                # Contar municipios únicos visitados
+                # Necesitamos unir UserLocationVisit -> Location -> Municipality
+                unique_municipalities_count = db.query(func.count(distinct(Municipality.municipality_id)))\
+                                        .join(Location, Location.municipality_id == Municipality.municipality_id)\
+                                        .join(UserLocationVisit, UserLocationVisit.location_id == Location.location_id)\
+                                        .filter(UserLocationVisit.user_id == user_id)\
+                                        .scalar() # Usar .scalar() para obtener el único resultado del conteo
+
+                print(f"DEBUG Backend: Estadísticas actualizadas - Visitas Únicas: {unique_visits_count}, Municipios Únicos: {unique_municipalities_count}")
+
+                # 2. Obtener IDs de logros ya ganados por el usuario
+                earned_achievement_ids = {ua.achievement_id for ua in db.query(UserAchievement).filter_by(user_id=user_id).all()}
+                print(f"DEBUG Backend: Logros ya ganados por user {user_id}: {earned_achievement_ids}")
+
+                unlocked_achievements = []
+
+                # 3. Iterar a través de los logros definidos y comprobar
+                # Asegúrate de que tu lista ACHIEVEMENTS esté definida en este archivo o importada
+                # ACHIEVEMENT_TOTAL_VISITAS = 1 # Ejemplo de ID de logro (ajustar según tu ACHIEVEMENTS)
+                # ACHIEVEMENT_PRIMER_MUNICIPIO = 2 # Ejemplo de ID de logro (ajustar según tu ACHIEVEMENTS)
+                # ... etc.
+
+                for achievement_data in ACHIEVEMENTS: # Itera sobre la lista de logros definidos (debes tenerla)
+                    achievement_id = achievement_data['id']
+                    required_visits = achievement_data.get('required_visits') # None si no aplica
+                    required_municipalities = achievement_data.get('required_municipalities') # None si no aplica
+
+                # 4. Comprobar si el logro ya fue ganado
+                    if achievement_id in earned_achievement_ids:
+                        print(f"DEBUG Backend: Logro {achievement_id} ya ganado. Saltando comprobación.")
+                        continue # Saltar si ya lo tiene
+
+
+                # 5. Comprobar si cumple los requisitos CON las estadísticas actualizadas
+                is_unlocked = False
+                if required_visits is not None and unique_visits_count >= required_visits:
+                    is_unlocked = True # Cumple requisito de visitas
+            
+                if required_municipalities is not None and unique_municipalities_count >= required_municipalities:
+                    # Si tiene requisito de visitas Y municipios, ambos deben cumplirse.
+                    # Si solo tiene requisito de municipios, basta con que cumpla ese.
+                    if required_visits is not None: # Si también requiere visitas, comprueba que is_unlocked ya sea True
+                        if is_unlocked and unique_municipalities_count >= required_municipalities:
+                           is_unlocked = True
+                        else:
+                           is_unlocked = False # No cumple ambos
+                    else: # Si solo requiere municipios
+                     is_unlocked = True
+
+                # Lógica más compleja para otros tipos de logros iría aquí
+                # ej: required_locations: [{'location_id': 1}, {'location_id': 5}]
+
+
+                # 6. Si el logro es desbloqueado y no lo tenía
+                if is_unlocked:
+                    print(f"DEBUG Backend: Logro {achievement_id} DESBLOQUEADO para user {user_id}!")
+                    new_user_achievement = UserAchievement(user_id=user_id, achievement_id=achievement_id)
+                    db.add(new_user_achievement) # Añadir el nuevo logro ganado a la sesión
+                    unlocked_achievements.append(achievement_data) # Añadir a la lista de logros desbloqueados en esta petición
+
+                # --- Fin Lógica de Desbloqueo de Logros ---
+        
+                db.commit() # Guardar la nueva visita Y los nuevos logros (si los hay) en la base de datos
+
+                # --- Código existente o modificado: Retornar la respuesta ---
+                # Puedes modificar la respuesta para incluir los logros desbloqueados
+                response_data = {
+                    "message": "Check-in exitoso!",
+                    "location_id": location_id,
+                    "user_id": user_id,
+                    "unlocked_achievements": unlocked_achievements # Añadimos la lista de logros desbloqueados
+                }
+                return jsonify(response_data), 200
 
                 # Retornar respuesta de éxito
                 return jsonify({
@@ -239,11 +322,12 @@ def checkin_location():
                     "radio_permitido_metros": CHECKIN_RADIUS_METERS,
                     "visit_id": new_visit.visit_id # Opcional: devolver el ID de la visita creada
                 }), 200 # 200 OK
-
+        
             except Exception as e:
-                db.rollback() # Deshacer si hay un error en el proceso de DB (ej: violación de UniqueConstraint si la añades)
+                db.rollback()
                 print(f"DEBUG: Check-in - Error al registrar visita para UserID={user_id}, LocationID={location_id}: {e}")
-                return jsonify({"message": f"Error interno al registrar la visita: {e}", "status": "error_db"}), 500 # 500 Internal Server Error
+                # Este mensaje es devuelto al frontend
+                return jsonify({"message": f"Error interno al registrar la visita: {e}", "status": "error_db"}), 500
 
 
         else:
