@@ -5,9 +5,6 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, F
 from sqlalchemy.orm import relationship, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 import datetime
-import models
-
-
 
 
 # Define la URL de conexión a tu base de datos.
@@ -88,7 +85,8 @@ class Location(Base):
     description = Column(Text) # Descripción, usamos Text por si es largo
     latitude = Column(Float, nullable=False) # Coordenada de latitud
     longitude = Column(Float, nullable=False) # Coordenada de longitud
-    unlocked_content_url = Column(String) # URL del contenido desbloqueable (puede ser nulo inicialmente)
+    main_image_url = Column(String, nullable=True) # O False si todas las ubicaciones tendrán una imagen principal
+    unlocked_content_url = Column(String, nullable=True) # Este ya lo tenías
     difficulty = Column(String) # Dificultad (ej: 'Fácil', 'Media')
     is_natural = Column(Boolean, default=False, nullable=False) # Indica si es natural (True/False)
     best_season = Column(String) # Mejor época para visitar (ej: 'Verano', 'Todo el Año')
@@ -108,16 +106,6 @@ class User(Base):
     registration_date = Column(DateTime, default=datetime.datetime.utcnow, nullable=False) # Usar UTC es buena práctica
     total_visits = Column(Integer, default=0, nullable=False)
     visits = relationship("UserLocationVisit", back_populates="user")
-
-
-class UserVisit(Base):
-    __tablename__ = 'user_visits'
-
-    visit_id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
-    location_id = Column(Integer, ForeignKey('locations.location_id'), nullable=False)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
-
 
     
 class Review(Base):

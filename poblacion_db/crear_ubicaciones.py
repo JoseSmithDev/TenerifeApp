@@ -50,7 +50,8 @@ def populate_locations(session):
         description="Emblemático edificio diseñado por Santiago Calatrava en Santa Cruz de Tenerife.",
         latitude=28.4710,
         longitude=-16.2527,
-        unlocked_content_url="https://ejemplo.com/foto_auditorio.jpg", # TODO: Reemplazar por URL real
+        main_image_url="http://10.0.2.2:5000/static/location_images/auditorio-santa-cruz.jpg",
+        unlocked_content_url="http://10.0.2.2:5000/static/location_images/auditorio-santa-cruz.jpg", # TODO: Reemplazar por URL real
         difficulty="Fácil Acceso",
         is_natural=False,
         best_season="Todo el Año",
@@ -65,7 +66,8 @@ def populate_locations(session):
         description="Famoso parque acuático en Costa Adeje.",
         latitude=28.072088,
         longitude=-16.725585,
-        unlocked_content_url="https://ejemplo.com/foto_siampark.jpg", # TODO: Reemplazar por URL real
+        main_image_url="http://10.0.2.2:5000/static/location_images/Siam-Park.jpg",
+        unlocked_content_url="http://10.0.2.2:5000/static/location_images/Siam-Park.jpg", # TODO: Reemplazar por URL real
         difficulty="Fácil Acceso",
         is_natural=False,
         best_season="Verano", # O "Todo el Año"
